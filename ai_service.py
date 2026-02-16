@@ -7,7 +7,6 @@ import asyncio
 load_dotenv()
 
 # --- 1. LOAD ALL KEYS ---
-# We look for keys named GEMINI_KEY_1, GEMINI_KEY_2, etc.
 API_KEYS = []
 i = 1
 while True:
@@ -17,7 +16,6 @@ while True:
     i += 1
 
 if not API_KEYS:
-    # Fallback to standard name if numbered ones aren't found
     single_key = os.getenv("GOOGLE_API_KEY")
     if single_key: API_KEYS.append(single_key)
 
@@ -26,29 +24,54 @@ print(f"🔑 Loaded {len(API_KEYS)} Gemini API Keys.")
 # --- 2. FAILOVER FUNCTION ---
 async def safe_generate_content(prompt: str):
     """
-    Tries keys one by one. If Key 1 fails (Quota), it switches to Key 2.
+    Tries keys one by one. 
+    Tries the specific models found in your logs.
     """
-    # Shuffle keys so we don't always hammer Key 1 first
-    # (Optional: remove shuffle if you want a strict order)
     shuffled_keys = API_KEYS.copy()
     random.shuffle(shuffled_keys)
+
+    # ✅ UPDATED: Only using models confirmed in your logs
+    model_names = [
+        'gemini-2.0-flash',       # Fast & Stable
+        'gemini-2.5-flash',       # Newest
+        'gemini-flash-latest',    # Generic Fallback
+        'gemini-pro'              # Legacy Fallback
+    ]
 
     for key in shuffled_keys:
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
             
-            # Run in executor because genai is synchronous
-            response = await asyncio.to_thread(model.generate_content, prompt)
-            
-            if response and response.text:
-                return response.text
+            for model_name in model_names:
+                try:
+                    # Create model
+                    model = genai.GenerativeModel(model_name)
+                    
+                    # Run generation
+                    response = await asyncio.to_thread(model.generate_content, prompt)
+                    
+                    if response and response.text:
+                        print(f"✅ Success using Key ...{key[-4:]} with model {model_name}")
+                        return response.text
+                        
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # If model not found (404), try next model in list
+                    if "404" in error_str or "not found" in error_str:
+                        continue 
+                    # If quota (429), stop this key loop and try next key
+                    elif "429" in error_str or "quota" in error_str:
+                        print(f"⚠️ Key ...{key[-4:]} Quota Exceeded. Switching keys...")
+                        break 
+                    else:
+                        print(f"⚠️ Error with {model_name}: {e}")
+                        continue
                 
         except Exception as e:
-            print(f"⚠️ Key failed: {str(e)[:50]}... Trying next key.")
+            print(f"⚠️ Key Config Failed: {e}")
             continue
             
-    print("❌ All Gemini Keys exhausted.")
+    print("❌ All Gemini Keys exhausted or no models worked.")
     return None
 
 # --- 3. EXPORTED FUNCTIONS ---
@@ -69,17 +92,13 @@ async def chat_with_plant(user_msg, sensors, profile):
     return await safe_generate_content(prompt)
 
 async def get_botanist_analysis(sensors, history, profile):
-    # (This function might not be used in your current flow, but keeping it safe)
-    return "Analysis complete." 
+    return "Analysis placeholder"
 
 async def generate_weekly_report(daily_stats, profile):
-    # This is handled dynamically in main.py now, but keeping placeholder
-    return "Weekly report ready."
+    return "Report placeholder"
 
 async def analyze_plant_image(image_bytes, sensors):
-    # (Placeholder if you add image features later)
     return "Image analyzed."
 
 async def get_common_diseases(profile):
-    # (Placeholder)
     return "Root rot, Pests."
