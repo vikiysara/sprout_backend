@@ -5,33 +5,33 @@ from dotenv import load_dotenv
 from google import genai
 
 load_dotenv()
-
 logger = logging.getLogger("AIService")
 
 # =====================================================
-# CONFIG
+# CONFIG (2026 Strict Priority)
 # =====================================================
 
-GEMINI_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_KEY_1")
-
+GEMINI_KEY = os.getenv("GEMINI_KEY")
 if not GEMINI_KEY:
-    raise RuntimeError("❌ GEMINI_KEY missing")
+    raise RuntimeError("❌ GEMINI_KEY missing in .env")
 
 client = genai.Client(api_key=GEMINI_KEY)
 
-# working models only
+# ⭐ YOUR SPECIFIC PRIORITY LIST
 MODEL_PRIORITY = [
-    "gemini-2.5-flash",        # main
-    "gemini-2.5-flash-exp",    # backup
-    "gemini-2.5-flash-lite",   # final fallback
+    "gemini-2.5-flash-lite",  # First
+    "gemini-2.5-flash",       # Second
+    "gemini-2.0-flash",       # Third
+    "gemini-2.0-flash-lite",  # Fourth
+    "gemini-2.0-flash-exp",   # Fifth
+    "gemini-2.5-pro"          # Finally
 ]
 
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 12
 MAX_RETRIES = 2
 
-
 # =====================================================
-# LOW LEVEL CALL
+# CORE AI LOGIC
 # =====================================================
 
 async def _call_model(model: str, prompt: str):
@@ -44,78 +44,55 @@ async def _call_model(model: str, prompt: str):
         timeout=REQUEST_TIMEOUT
     )
 
-
-# =====================================================
-# SMART GENERATION ENGINE
-# =====================================================
-
 async def generate_raw_response(prompt: str, model_name=None):
     """
-    Smart routing with retry + fallback.
+    Automatic cascading fallback based on your specific 6-tier list.
     """
-
-    models = []
-
+    models_to_try = []
+    
+    # If a specific model is requested by the endpoint, try that first
     if model_name:
-        models.append(model_name)
+        models_to_try.append(model_name)
+    
+    # Add the rest from the priority list
+    for m in MODEL_PRIORITY:
+        if m not in models_to_try:
+            models_to_try.append(m)
 
-    models.extend(m for m in MODEL_PRIORITY if m not in models)
-
-    for model in models:
-
+    for model in models_to_try:
         for attempt in range(MAX_RETRIES):
             try:
-                logger.info(f"⚡ {model} attempt {attempt+1}")
-
+                logger.info(f"⚡ Tier: {model} (Attempt {attempt+1})")
                 res = await _call_model(model, prompt)
 
                 if res and res.text:
                     return res.text.strip()
 
-            except asyncio.TimeoutError:
-                logger.warning(f"Timeout → {model}")
-
             except Exception as e:
                 err = str(e).lower()
+                # Catch Quota (429), Not Found (404), or Server Overload
+                if any(x in err for x in ["429", "quota", "404", "not found", "limit", "overloaded"]):
+                    logger.warning(f"Tier {model} failed/exhausted → Trying next model...")
+                    break 
 
-                if "429" in err or "quota" in err:
-                    logger.warning(f"Quota hit → {model}")
-                    break
+                logger.error(f"Error on {model}: {err[:50]}")
+            
+            await asyncio.sleep(1) # Backoff before retry on same model
 
-                if "404" in err or "not found" in err:
-                    logger.warning(f"Model unavailable → {model}")
-                    break
-
-                logger.error(f"{model}: {err[:100]}")
-
-            # exponential backoff
-            await asyncio.sleep(1.5 ** attempt)
-
-    logger.error("❌ All models failed")
+    logger.error("❌ Critical: All 6 AI tiers failed to respond.")
     return None
 
-
-# =====================================================
-# PLANT CHAT
-# =====================================================
-
-async def chat_with_plant(
-    user_msg,
-    sensors,
-    profile,
-    model_name=None
-):
+async def chat_with_plant(user_msg, sensors, profile, model_name=None):
     prompt = f"""
-You are a {profile.get('species','plant')} named {profile.get('name','Sprout')}.
+    You are a {profile.get('species','plant')} named {profile.get('name','Sprout')}.
+    
+    CURRENT VITALS:
+    - Moisture: {sensors.get('soil_moisture',0)}%
+    - Temp: {sensors.get('temperature',0)}°C
+    - Light: {sensors.get('light_level',0)}%
 
-Vitals:
-Moisture: {sensors.get('soil_moisture',0)}%
-Temperature: {sensors.get('temperature',0)}°C
-Light: {sensors.get('light_level',0)} lux
+    USER MESSAGE: "{user_msg}"
 
-User: "{user_msg}"
-
-Reply in 1-2 witty sentences in first person.
-"""
-
+    TASK: Respond in 1-2 witty, dramatic, first-person sentences based on your vitals.
+    """
     return await generate_raw_response(prompt, model_name)
