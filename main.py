@@ -34,7 +34,7 @@ app = FastAPI(title="Sprout Pro Backend v2.0", lifespan=lifespan)
 MODEL_TIERS = {
     "default": "gemini-2.5-flash-lite", # First choice
     "backup": "gemini-2.5-flash",       # Second choice
-    "diagnostics": "gemini-2.5-pro"      # Final choice for complex health
+    "diagnostics": "gemini-2.5-pro"     # Final choice for complex health
 }
 
 # =====================================================
@@ -90,39 +90,49 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        return {"reply": "My roots are a bit tangled. Try again soon 🌱", "engine": "error"}
+        return {"reply": "My leaves are a bit tangled. Try again in a minute! 🌱", "engine": "error"}
 
 @app.get("/analytics/week")
 async def get_weekly_stats():
     daily_stats = await get_weekly_analytics()
     if len(daily_stats) < 2:
-        return {"daily_stats": daily_stats, "report_card": "Gathering more biological data... 📡"}
+        return {"daily_stats": daily_stats, "report_card": "Just getting settled in! Check back later for my weekly update. 📡"}
 
     try:
         raw_logs = await get_raw_history_for_ai(days=7)
         profile = await get_plant_profile()
 
         prompt = f"""
-        ROLE: You are the digital consciousness of a {profile.get('name','plant')}.
-        CONTEXT: Analyze these biological logs from the last 7 days: {raw_logs}
-        TASK: Write a 2-sentence witty report card in the first person.
+        ROLE: You are a friendly, casual {profile.get('name','plant')}.
+        CONTEXT: Look at your sensor logs from the past week: {raw_logs}
+        
+        TASK: Write a 2-sentence weekly update telling your friend (the user) how your week went.
+        GUIDELINES: 
+        1. Use very simple, everyday English.
+        2. Be casual and friendly. 
+        3. Do not sound robotic, and do not use big dictionary words.
         """
 
         # Start analysis with your top-priority model
         report = await generate_raw_response(prompt, model_name=MODEL_TIERS["default"])
-        return {"daily_stats": daily_stats, "report_card": report or "Analysis pending."}
+        return {"daily_stats": daily_stats, "report_card": report or "I'm still thinking about my week!"}
 
     except Exception as e:
         logger.error(f"Analytics error: {e}")
-        return {"daily_stats": daily_stats, "report_card": "Analysis offline."}
+        return {"daily_stats": daily_stats, "report_card": "Taking a quick nap, check my report later."}
 
 @app.post("/plant/care_profile")
 async def get_care_profile(req: PlantNameRequest):
     try:
         prompt = f"""
-        ROLE: You are a {req.plant_name}.
-        TASK: Return strictly valid JSON with keys "tip" (2-3 sentences witty) and "diseases" (3 items).
-        CONSTRAINT: No Markdown.
+        ROLE: You are a friendly {req.plant_name}.
+        TASK: Return strictly valid JSON with keys "tip" and "diseases".
+        
+        GUIDELINES:
+        - "tip": Write 2 short, friendly sentences of everyday advice in the first person. Keep it super simple.
+        - "diseases": List 3 common issues formatted simply (e.g., "1. Bug name (How to fix)").
+        
+        CONSTRAINT: Return ONLY raw JSON. No Markdown. No big dictionary words.
         """
         text = await generate_raw_response(prompt, model_name=MODEL_TIERS["default"])
         match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -132,9 +142,10 @@ async def get_care_profile(req: PlantNameRequest):
     except Exception as e:
         logger.error(f"Care profile error: {e}")
         return {
-            "tip": f"I'm a {req.plant_name}, keep me hydrated! 🌱",
-            "diseases": "1. Root Rot 2. Pests 3. Leaf Burn"
+            "tip": f"Hey, I'm a {req.plant_name}! Just make sure to check my soil before watering me.",
+            "diseases": "1. Root Rot (let me dry out) 2. Pests (wipe my leaves) 3. Sunburn (move me to the shade)"
         }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    
